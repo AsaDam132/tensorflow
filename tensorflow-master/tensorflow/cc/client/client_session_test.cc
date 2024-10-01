@@ -16,12 +16,10 @@ limitations under the License.
 #define EIGEN_USE_THREADS
 
 #include "tensorflow/cc/client/client_session.h"
-
 #include <utility>
 #include <vector>
-
 #include "absl/synchronization/barrier.h"
-#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
+#include "unsupported/Eigen/CXX11/Tensor"  // Eigen for Tensor operations
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
@@ -268,3 +266,214 @@ TEST(ClientSessionTest, CallableWithCustomThreadPool) {
 
 }  // namespace
 }  // namespace tensorflow
+
+
+// Helper function to run a session on a specific device and return the result.
+tensorflow::Status RunSessionOnDevice(const std::string& device_name, 
+                                      const Output& operation, 
+                                      std::vector<Tensor>& outputs) {
+  // Create a new root scope and place all operations on the specified device.
+  Scope root = Scope::NewRootScope().WithDevice(device_name);
+
+  // Create the session with the specified device
+  ClientSession session(root);
+  return session.Run({operation}, &outputs);
+}
+
+// Test for adding two constants across CPU and GPU.
+TEST(CrossDeviceExecutionTest, AddOperationOnCpuAndGpu) {
+  // Define the scope for the CPU computation.
+  Scope cpu_scope = Scope::NewRootScope().WithDevice("/cpu:0");
+  auto cpu_a = ops::Const(cpu_scope, 10);
+  auto cpu_b = ops::Const(cpu_scope, 32);
+  auto cpu_add = ops::Add(cpu_scope, cpu_a, cpu_b);
+
+  // Define the scope for the GPU computation.
+  Scope gpu_scope = Scope::NewRootScope().WithDevice("/gpu:0");
+  auto gpu_a = ops::Const(gpu_scope, 10);
+  auto gpu_b = ops::Const(gpu_scope, 32);
+  auto gpu_add = ops::Add(gpu_scope, gpu_a, gpu_b);
+
+  // Run the CPU computation.
+  std::vector<Tensor> cpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/cpu:0", cpu_add, cpu_outputs));
+
+  // Run the GPU computation.
+  std::vector<Tensor> gpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/gpu:0", gpu_add, gpu_outputs));
+
+  // Validate that the results are identical.
+  test::ExpectTensorEqual<int>(cpu_outputs[0], gpu_outputs[0]);
+}
+// Test for multiplying two constants across CPU and GPU.
+TEST(CrossDeviceExecutionTest, MulOperationOnCpuAndGpu) {
+  // Define the scope for the CPU computation.
+  Scope cpu_scope = Scope::NewRootScope().WithDevice("/cpu:0");
+  auto cpu_a = ops::Const(cpu_scope, {2, 3});
+  auto cpu_b = ops::Const(cpu_scope, {4, 5});
+  auto cpu_mul = ops::Mul(cpu_scope, cpu_a, cpu_b);
+
+  // Define the scope for the GPU computation.
+  Scope gpu_scope = Scope::NewRootScope().WithDevice("/gpu:0");
+  auto gpu_a = ops::Const(gpu_scope, {2, 3});
+  auto gpu_b = ops::Const(gpu_scope, {4, 5});
+  auto gpu_mul = ops::Mul(gpu_scope, gpu_a, gpu_b);
+
+  // Run the CPU computation.
+  std::vector<Tensor> cpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/cpu:0", cpu_mul, cpu_outputs));
+
+  // Run the GPU computation.
+  std::vector<Tensor> gpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/gpu:0", gpu_mul, gpu_outputs));
+
+  // Validate that the results are identical.
+  test::ExpectTensorEqual<int>(cpu_outputs[0], gpu_outputs[0]);
+}
+
+// Test for matrix multiplication across CPU and GPU.
+TEST(CrossDeviceExecutionTest, MatMulOperationOnCpuAndGpu) {
+  // Define the scope for the CPU computation.
+  Scope cpu_scope = Scope::NewRootScope().WithDevice("/cpu:0");
+  auto cpu_matrix_a = ops::Const(cpu_scope, {{1, 2}, {3, 4}});
+  auto cpu_matrix_b = ops::Const(cpu_scope, {{5, 6}, {7, 8}});
+  auto cpu_matmul = ops::MatMul(cpu_scope, cpu_matrix_a, cpu_matrix_b);
+
+  // Define the scope for the GPU computation.
+  Scope gpu_scope = Scope::NewRootScope().WithDevice("/gpu:0");
+  auto gpu_matrix_a = ops::Const(gpu_scope, {{1, 2}, {3, 4}});
+  auto gpu_matrix_b = ops::Const(gpu_scope, {{5, 6}, {7, 8}});
+  auto gpu_matmul = ops::MatMul(gpu_scope, gpu_matrix_a, gpu_matrix_b);
+
+  // Run the CPU computation.
+  std::vector<Tensor> cpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/cpu:0", cpu_matmul, cpu_outputs));
+
+  // Run the GPU computation.
+  std::vector<Tensor> gpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/gpu:0", gpu_matmul, gpu_outputs));
+
+  // Validate that the results are identical.
+  test::ExpectTensorEqual<int>(cpu_outputs[0], gpu_outputs[0]);
+}
+
+// Test that operations are correctly placed on the device.
+TEST(CrossDeviceExecutionTest, OperationPlacementTest) {
+  Scope root = Scope::NewRootScope();
+
+  // Place an operation on CPU.
+  auto cpu_a = ops::Const(root.WithDevice("/cpu:0"), {1, 2});
+  auto cpu_b = ops::Const(root.WithDevice("/cpu:0"), {3, 4});
+  auto cpu_add = ops::Add(root.WithDevice("/cpu:0"), cpu_a, cpu_b);
+
+  // Place an operation on GPU.
+  auto gpu_a = ops::Const(root.WithDevice("/gpu:0"), {1, 2});
+  auto gpu_b = ops::Const(root.WithDevice("/gpu:0"), {3, 4});
+  auto gpu_add = ops::Add(root.WithDevice("/gpu:0"), gpu_a, gpu_b);
+
+  // Verify the devices for each operation.
+  ASSERT_EQ(cpu_add.node()->assigned_device_name(), "/cpu:0");
+  ASSERT_EQ(gpu_add.node()->assigned_device_name(), "/gpu:0");
+
+  // Run the CPU computation.
+  std::vector<Tensor> cpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/cpu:0", cpu_add, cpu_outputs));
+
+  // Run the GPU computation.
+  std::vector<Tensor> gpu_outputs;
+  TF_EXPECT_OK(RunSessionOnDevice("/gpu:0", gpu_add, gpu_outputs));
+
+  // Validate that the results are identical.
+  test::ExpectTensorEqual<int>(cpu_outputs[0], gpu_outputs[0]);
+}
+
+// Helper function to run a session and return the status.
+tensorflow::Status RunSession(const Scope& root, const Output& operation,
+                              std::vector<Tensor>& outputs) {
+  ClientSession session(root);
+  return session.Run({operation}, &outputs);
+}
+
+// Test case for invalid feeds (wrong data types or shapes).
+TEST(ErrorHandlingTest, InvalidFeedTest) {
+  Scope root = Scope::NewRootScope();
+
+  // Placeholder expecting an int32 tensor.
+  auto a = ops::Placeholder(root, DT_INT32);
+
+  // Invalid feed: Feeding a float instead of an int.
+  ClientSession session(root);
+  std::vector<Tensor> outputs;
+  Status status = session.Run({{a, Tensor(DT_FLOAT, TensorShape({}))}}, {}, &outputs);
+
+  // Expect failure with an error status for invalid feed type.
+  EXPECT_FALSE(status.ok());
+  EXPECT_TRUE(absl::StrContains(status.error_message(), "expected int32"));
+
+  // Invalid feed: Feeding a tensor of incompatible shape.
+  Tensor wrong_shape_tensor(DT_INT32, TensorShape({2, 2}));
+  status = session.Run({{a, wrong_shape_tensor}}, {}, &outputs);
+
+  // Expect failure due to incompatible shape.
+  EXPECT_FALSE(status.ok());
+  EXPECT_TRUE(absl::StrContains(status.error_message(), "shapes must be equal"));
+}
+
+// Test case for invalid operations (e.g., divide by zero).
+TEST(ErrorHandlingTest, InvalidOperationTest) {
+  Scope root = Scope::NewRootScope();
+
+  // Division operation: Attempt to divide by zero.
+  auto x = ops::Const(root, 10);
+  auto y = ops::Const(root, 0);  // Invalid divisor.
+  auto div_op = ops::Div(root, x, y);
+
+  std::vector<Tensor> outputs;
+  Status status = RunSession(root, div_op, outputs);
+
+  // Expect failure due to divide by zero.
+  EXPECT_FALSE(status.ok());
+  EXPECT_TRUE(absl::StrContains(status.error_message(), "Attempt to divide by zero"));
+}
+
+// Test case for session timeout (simulating long computation).
+TEST(ErrorHandlingTest, SessionTimeoutTest) {
+  Scope root = Scope::NewRootScope();
+
+  // Simple computation that should complete normally.
+  auto a = ops::Const(root, 1);
+  auto b = ops::Const(root, 2);
+  auto add_op = ops::Add(root, a, b);
+
+  ClientSession session(root);
+
+  // Set a very short timeout for the session (to simulate timeout).
+  SessionOptions options;
+  options.config.mutable_experimental()->set_rpc_timeout_in_ms(1);  // 1ms timeout
+
+  std::vector<Tensor> outputs;
+  Status status = session.Run({add_op}, &outputs);
+
+  // Expect timeout failure (since 1ms is too short for most computations).
+  EXPECT_FALSE(status.ok());
+  EXPECT_TRUE(absl::StrContains(status.error_message(), "timeout"));
+}
+
+// Test case for uninitialized tensors (attempting to use a tensor that was not initialized).
+TEST(ErrorHandlingTest, UninitializedTensorTest) {
+  Scope root = Scope::NewRootScope();
+
+  // Placeholder that is never fed (remains uninitialized).
+  auto uninitialized_placeholder = ops::Placeholder(root, DT_INT32);
+
+  // Attempt to use the uninitialized placeholder in an operation.
+  auto add_op = ops::Add(root, uninitialized_placeholder, {10});
+
+  std::vector<Tensor> outputs;
+  Status status = RunSession(root, add_op, outputs);
+
+  // Expect failure due to uninitialized tensor.
+  EXPECT_FALSE(status.ok());
+  EXPECT_TRUE(absl::StrContains(status.error_message(), "uninitialized"));
+}
+
