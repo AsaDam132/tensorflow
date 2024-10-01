@@ -16,10 +16,12 @@ limitations under the License.
 #define EIGEN_USE_THREADS
 
 #include "tensorflow/cc/client/client_session.h"
+
 #include <utility>
 #include <vector>
+
 #include "absl/synchronization/barrier.h"
-#include "unsupported/Eigen/CXX11/Tensor"  // Eigen for Tensor operations
+#include "unsupported/Eigen/CXX11/Tensor"  // from @eigen_archive
 #include "tensorflow/cc/ops/standard_ops.h"
 #include "tensorflow/core/framework/tensor_testutil.h"
 #include "tensorflow/core/lib/core/status_test_util.h"
